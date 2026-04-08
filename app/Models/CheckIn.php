@@ -17,4 +17,9 @@ class CheckIn extends Model
     protected $casts = [
         'checked_in_at' => 'datetime',
     ];
+
+    public function patient()
+    {
+        return $this->belongsTo(Patient::class);
+    }
 }

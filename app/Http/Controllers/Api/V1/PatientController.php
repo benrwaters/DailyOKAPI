@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\CarerPatient;
 use App\Models\CheckIn;
 use App\Models\CheckInSchedule;
 use App\Models\Patient;
+use App\Services\Push\PushNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 
@@ -60,7 +62,7 @@ class PatientController extends Controller
         ]);
     }
 
-    public function check_in_now(Request $request)
+    public function check_in_now(Request $request, PushNotificationService $pushes)
     {
         /** @var Patient $patient */
         $patient = $request->user();
@@ -113,11 +115,18 @@ class PatientController extends Controller
         $schedule->next_due_at = $next_due_at;
         $schedule->save();
 
+        $pushes->notifyCarersOfCheckIn($patient, $check_in);
+
+        $carerCount = CarerPatient::query()
+            ->where('patient_id', $patient->id)
+            ->count();
+
         return response()->json([
             'ok' => true,
             'server_now_at' => $now_utc->toIso8601String(),
             'checked_in_at' => $now_utc->toIso8601String(),
             'next_due_at' => $next_due_at->toIso8601String(),
+            'carer_notifications_attempted' => $carerCount,
         ]);
     }
 

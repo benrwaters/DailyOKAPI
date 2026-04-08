@@ -64,3 +64,33 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## DailyOK Notes
+
+### Push notifications
+
+The app now includes backend and iOS plumbing for:
+
+- patient reminder pushes before due time, at due time, and 1 hour overdue
+- carer push notifications when a linked patient checks in
+- iOS device token registration at `POST /api/v1/devices/register`
+- recent patient check-in history in the carer loved-ones API response
+
+Relevant commands:
+
+```bash
+docker compose exec app php artisan notifications:send-check-in-reminders
+docker compose exec app php artisan schedule:work
+```
+
+Required APNs env vars:
+
+```bash
+APPLE_BUNDLE_ID=uk.co.coastalcardiology.dailyok
+APNS_USE_SANDBOX=true
+APNS_TEAM_ID=YOUR_TEAM_ID
+APNS_KEY_ID=YOUR_KEY_ID
+APNS_PRIVATE_KEY_PATH=/absolute/path/to/AuthKey_XXXX.p8
+```
+
+You can also use `APNS_PRIVATE_KEY` instead of `APNS_PRIVATE_KEY_PATH`.

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Carer;
 use App\Models\CarerPatient;
 use App\Models\CheckInSchedule;
+use App\Models\CheckIn;
 use App\Models\Patient;
 use App\Models\PatientInvite;
 use App\Services\BulkSmsClient;
@@ -383,9 +384,17 @@ class CarerController extends Controller
             ->orderBy('patients.display_name')
             ->get();
 
+        $patientIds = $rows->pluck('patient_id')->all();
+        $recentCheckIns = CheckIn::query()
+            ->whereIn('patient_id', $patientIds)
+            ->orderByDesc('checked_in_at')
+            ->get()
+            ->groupBy('patient_id')
+            ->map(fn ($items) => $items->take(10)->values());
+
         return response()->json([
             'ok' => true,
-            'loved_ones' => $rows->map(function ($r) {
+            'loved_ones' => $rows->map(function ($r) use ($recentCheckIns) {
                 return [
                     'id' => (string) $r->patient_id,
                     'display_name' => $r->display_name ?: 'Loved one',
@@ -394,6 +403,11 @@ class CarerController extends Controller
                     'timezone' => $r->timezone,
                     'last_check_in_at' => $r->last_check_in_at ? \Carbon\Carbon::parse($r->last_check_in_at)->toIso8601String() : null,
                     'next_due_at' => $r->next_due_at ? \Carbon\Carbon::parse($r->next_due_at)->toIso8601String() : null,
+                    'recent_check_ins' => ($recentCheckIns[$r->patient_id] ?? collect())->map(fn ($checkIn) => [
+                        'id' => (string) $checkIn->id,
+                        'checked_in_at' => optional($checkIn->checked_in_at)->toIso8601String(),
+                        'type' => $checkIn->type,
+                    ])->values(),
                 ];
             })->values(),
         ]);

@@ -7,6 +7,10 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
+        if (Schema::hasTable('check_ins')) {
+            return;
+        }
+
         Schema::create('check_ins', function (Blueprint $table) {
             $table->id();
             $table->foreignId('patient_id')->constrained('patients')->cascadeOnDelete();
@@ -20,6 +24,7 @@ return new class extends Migration {
 
     public function down(): void
     {
-        Schema::dropIfExists('check_ins');
+        // Intentionally left as a no-op because this migration only exists
+        // to reconcile environments where the table was already created.
     }
 };

@@ -29,4 +29,10 @@ class Carer extends Authenticatable
     {
         return $this->hasMany(\App\Models\CarerSubscription::class);
     }
+
+    public function devices()
+    {
+        return $this->hasMany(\App\Models\Device::class, 'owner_id')
+            ->where('owner_type', 'carer');
+    }
 }

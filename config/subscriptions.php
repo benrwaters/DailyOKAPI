@@ -5,7 +5,8 @@ return [
         'bundle_id' => env('APPLE_BUNDLE_ID'),
 
         'allowed_products' => [
-            'carer.subscription.monthly',
+            'uk.co.coastalcardiology.dailyok.monthly',
+            'uk.co.coastalcardiology.dailyok.annual',
         ],
 
         // legacy fallback
