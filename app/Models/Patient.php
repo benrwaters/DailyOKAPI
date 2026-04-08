@@ -36,4 +36,14 @@ class Patient extends Authenticatable
     {
         return $this->hasMany(CheckIn::class);
     }
+
+    public function invites()
+    {
+        return $this->hasMany(PatientInvite::class);
+    }
+
+    public function carerLinks()
+    {
+        return $this->hasMany(CarerPatient::class);
+    }
 }

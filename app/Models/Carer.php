@@ -35,4 +35,9 @@ class Carer extends Authenticatable
         return $this->hasMany(\App\Models\Device::class, 'owner_id')
             ->where('owner_type', 'carer');
     }
+
+    public function patientLinks()
+    {
+        return $this->hasMany(\App\Models\CarerPatient::class);
+    }
 }

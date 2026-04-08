@@ -31,9 +31,13 @@ Route::prefix('v1')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('devices/register', [DeviceController::class, 'register']);
         Route::post('carer/subscription/sync', [CarerSubscriptionController::class, 'sync']);
+        Route::get('carer/profile', [CarerController::class, 'profile']);
+        Route::patch('carer/profile', [CarerController::class, 'update_profile']);
 
         Route::get('carer/loved-ones', [CarerController::class, 'list_loved_one_invites']);
         Route::post('carer/loved-ones', [CarerController::class, 'create_loved_one_and_invite']);
+        Route::get('carer/loved-ones/{id}/check-ins', [CarerController::class, 'loved_one_check_ins']);
+        Route::delete('carer/loved-ones/{id}', [CarerController::class, 'delete_loved_one']);
         Route::post('carer/loved-ones/{invite_id}/resend', [CarerController::class, 'resend_loved_one_invite']);
         Route::post('carer/loved-ones/{invite_id}/cancel', [CarerController::class, 'cancel_loved_one_invite']);
 

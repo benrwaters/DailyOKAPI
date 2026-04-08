@@ -13,9 +13,69 @@ use App\Services\BulkSmsClient;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
  
 class CarerController extends Controller
 {
+    public function profile(Request $request)
+    {
+        /** @var Carer $carer */
+        $carer = $request->user();
+
+        return response()->json([
+            'ok' => true,
+            'profile' => [
+                'id' => $carer->id,
+                'full_name' => $carer->full_name,
+                'email' => $carer->email,
+                'mobile_number' => $carer->phone_e164,
+                'phone_e164' => $carer->phone_e164,
+                'status' => $carer->status,
+            ],
+        ]);
+    }
+
+    public function update_profile(Request $request)
+    {
+        /** @var Carer $carer */
+        $carer = $request->user();
+
+        $validated = $request->validate([
+            'full_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'email' => ['sometimes', 'nullable', 'email', 'max:255'],
+            'mobile_number' => ['sometimes', 'nullable', 'regex:/^\+[1-9]\d{7,14}$/'],
+            'phone_e164' => ['sometimes', 'nullable', 'regex:/^\+[1-9]\d{7,14}$/'],
+        ]);
+
+        if (array_key_exists('full_name', $validated)) {
+            $carer->full_name = $validated['full_name'];
+        }
+
+        if (array_key_exists('email', $validated)) {
+            $carer->email = $validated['email'];
+        }
+
+        if (array_key_exists('mobile_number', $validated)) {
+            $carer->phone_e164 = $validated['mobile_number'];
+        } elseif (array_key_exists('phone_e164', $validated)) {
+            $carer->phone_e164 = $validated['phone_e164'];
+        }
+
+        $carer->save();
+
+        return response()->json([
+            'ok' => true,
+            'profile' => [
+                'id' => $carer->id,
+                'full_name' => $carer->full_name,
+                'email' => $carer->email,
+                'mobile_number' => $carer->phone_e164,
+                'phone_e164' => $carer->phone_e164,
+                'status' => $carer->status,
+            ],
+        ]);
+    }
+
     public function resend_loved_one_invite(Request $request, string $invite_id, BulkSmsClient $bulksms)
     {
         /** @var Carer $carer */
@@ -118,6 +178,93 @@ class CarerController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    public function delete_loved_one(Request $request, string $id)
+    {
+        /** @var Carer $carer */
+        $carer = $request->user();
+
+        $patientId = $this->normalise_patient_id($id);
+
+        $link = CarerPatient::query()
+            ->where('carer_id', $carer->id)
+            ->where('patient_id', $patientId)
+            ->first();
+
+        if (!$link) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'not_found',
+                'message' => 'Contact not found.',
+            ], 404);
+        }
+
+        $otherCarerCount = CarerPatient::query()
+            ->where('patient_id', $patientId)
+            ->where('carer_id', '!=', $carer->id)
+            ->count();
+
+        if ($otherCarerCount > 0) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'contact_shared',
+                'message' => 'This contact is linked to another carer and cannot be fully removed automatically.',
+            ], 409);
+        }
+
+        DB::transaction(function () use ($patientId) {
+            $patient = Patient::query()->findOrFail($patientId);
+
+            $patient->tokens()->delete();
+            $patient->devices()->delete();
+            $patient->delete();
+        });
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function loved_one_check_ins(Request $request, string $id)
+    {
+        /** @var Carer $carer */
+        $carer = $request->user();
+
+        $patientId = $this->normalise_patient_id($id);
+
+        $link = CarerPatient::query()
+            ->where('carer_id', $carer->id)
+            ->where('patient_id', $patientId)
+            ->first();
+
+        if (!$link) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'not_found',
+                'message' => 'Contact not found.',
+            ], 404);
+        }
+
+        $patient = Patient::query()->findOrFail($patientId);
+        $checkIns = CheckIn::query()
+            ->where('patient_id', $patientId)
+            ->orderByDesc('checked_in_at')
+            ->get();
+
+        return response()->json([
+            'ok' => true,
+            'contact' => [
+                'id' => (string) $patient->id,
+                'display_name' => $patient->display_name,
+                'phone_e164' => $patient->phone_e164,
+                'status' => $patient->status,
+            ],
+            'check_ins' => $checkIns->map(fn ($checkIn) => [
+                'id' => (string) $checkIn->id,
+                'checked_in_at' => optional($checkIn->checked_in_at)->toIso8601String(),
+                'type' => $checkIn->type,
+                'created_at' => optional($checkIn->created_at)->toIso8601String(),
+            ])->values(),
+        ]);
+    }
+
     private function find_invite_for_carer_or_404(int $carer_id, string $invite_id): PatientInvite
     {
         $numeric_id = $this->normalise_invite_id($invite_id);
@@ -142,6 +289,22 @@ class CarerController extends Controller
         }
 
         return (int) $invite_id;
+    }
+
+    private function normalise_patient_id(string $patient_id): int
+    {
+        if (str_starts_with($patient_id, 'lov_')) {
+            $patient_id = substr($patient_id, 4);
+        }
+
+        if (!ctype_digit($patient_id)) {
+            abort(response()->json([
+                'ok' => false,
+                'error' => 'invalid_contact_id',
+            ], 422));
+        }
+
+        return (int) $patient_id;
     }
 
     private function debug_invite_email(
