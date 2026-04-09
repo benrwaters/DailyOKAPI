@@ -4,6 +4,7 @@ namespace App\Services\Push;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Throwable;
 
 class ApnsPushService
 {
@@ -25,34 +26,53 @@ class ApnsPushService
             ];
         }
 
-        $jwt = $this->createJwt();
-        $url = rtrim($this->baseUrl(), '/') . '/3/device/' . $deviceToken;
+        $deviceToken = $this->normalizeDeviceToken($deviceToken);
+        if ($deviceToken === '') {
+            return [
+                'ok' => false,
+                'status' => null,
+                'reason' => 'invalid_device_token',
+            ];
+        }
 
-        $response = Http::withToken($jwt)
-            ->withHeaders([
-                'apns-topic' => config('push.apns.bundle_id'),
-                'apns-push-type' => 'alert',
-                'apns-priority' => '10',
-            ])
-            ->withBody(json_encode([
-                'aps' => [
-                    'alert' => [
-                        'title' => $title,
-                        'body' => $body,
+        try {
+            $jwt = $this->createJwt();
+            $url = rtrim($this->baseUrl(), '/') . '/3/device/' . $deviceToken;
+
+            $response = Http::withToken($jwt)
+                ->timeout(10)
+                ->connectTimeout(5)
+                ->withHeaders([
+                    'apns-topic' => config('push.apns.bundle_id'),
+                    'apns-push-type' => 'alert',
+                    'apns-priority' => '10',
+                ])
+                ->withBody(json_encode([
+                    'aps' => [
+                        'alert' => [
+                            'title' => $title,
+                            'body' => $body,
+                        ],
+                        'sound' => 'default',
                     ],
-                    'sound' => 'default',
-                ],
-                'dailyok' => $payload,
-            ], JSON_UNESCAPED_SLASHES), 'application/json')
-            ->send('POST', $url);
+                    'dailyok' => $payload,
+                ], JSON_UNESCAPED_SLASHES), 'application/json')
+                ->send('POST', $url);
 
-        return [
-            'ok' => $response->successful(),
-            'status' => $response->status(),
-            'reason' => $response->successful()
-                ? null
-                : ($response->json('reason') ?? Str::limit($response->body(), 255, '')),
-        ];
+            return [
+                'ok' => $response->successful(),
+                'status' => $response->status(),
+                'reason' => $response->successful()
+                    ? null
+                    : ($response->json('reason') ?? Str::limit($response->body(), 255, '')),
+            ];
+        } catch (Throwable $e) {
+            return [
+                'ok' => false,
+                'status' => null,
+                'reason' => Str::limit($e->getMessage(), 255, ''),
+            ];
+        }
     }
 
     private function createJwt(): string
@@ -95,6 +115,11 @@ class ApnsPushService
         }
 
         return null;
+    }
+
+    private function normalizeDeviceToken(string $deviceToken): string
+    {
+        return preg_replace('/[^A-Fa-f0-9]/', '', $deviceToken) ?? '';
     }
 
     private function base64UrlEncode(string $value): string

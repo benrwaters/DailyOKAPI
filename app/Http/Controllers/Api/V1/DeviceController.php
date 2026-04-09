@@ -21,6 +21,15 @@ class DeviceController extends Controller
             'notifications_enabled' => ['nullable', 'boolean'],
         ]);
 
+        $normalizedPushToken = preg_replace('/[^A-Fa-f0-9]/', '', $validated['push_token']) ?? '';
+        if ($normalizedPushToken === '') {
+            return response()->json([
+                'ok' => false,
+                'error' => 'invalid_push_token',
+                'message' => 'Push token was invalid.',
+            ], 422);
+        }
+
         $owner = $request->user();
         $ownerType = match (true) {
             $owner instanceof Carer => 'carer',
@@ -29,7 +38,7 @@ class DeviceController extends Controller
         };
 
         Device::query()
-            ->where('push_token', $validated['push_token'])
+            ->where('push_token', $normalizedPushToken)
             ->where(function ($query) use ($ownerType, $owner) {
                 $query->where('owner_type', '!=', $ownerType)
                     ->orWhere('owner_id', '!=', $owner->id);
@@ -37,7 +46,7 @@ class DeviceController extends Controller
             ->delete();
 
         $device = Device::updateOrCreate(
-            ['push_token' => $validated['push_token']],
+            ['push_token' => $normalizedPushToken],
             [
                 'owner_type' => $ownerType,
                 'owner_id' => $owner->id,
