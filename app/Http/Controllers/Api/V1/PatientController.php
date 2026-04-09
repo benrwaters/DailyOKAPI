@@ -55,6 +55,7 @@ class PatientController extends Controller
                 'next_due_at' => $next_due_at->toIso8601String(),
                 'check_in_time_local' => $schedule->check_in_time_local,
                 'timezone' => $schedule->timezone,
+                'manual_check_in_requested_at' => $this->active_manual_check_in_requested_at($schedule, $now_utc)?->toIso8601String(),
             ],
             'last_check_in_at' => $schedule->last_check_in_at
                 ? $schedule->last_check_in_at->toIso8601String()
@@ -76,8 +77,11 @@ class PatientController extends Controller
             ->firstOrFail();
 
         $now_utc = now();
+        $manualRequestAt = $this->active_manual_check_in_requested_at($schedule, $now_utc);
 
         if (
+            $manualRequestAt === null
+            &&
             $schedule->last_check_in_at !== null
             && $this->is_same_local_day($schedule->timezone, $schedule->last_check_in_at, $now_utc)
         ) {
@@ -113,6 +117,9 @@ class PatientController extends Controller
 
         $schedule->last_check_in_at = $now_utc;
         $schedule->next_due_at = $next_due_at;
+        if ($manualRequestAt !== null) {
+            $schedule->manual_check_in_consumed_at = $now_utc;
+        }
         $schedule->save();
 
         $pushes->notifyCarersOfCheckIn($patient, $check_in);
@@ -181,5 +188,26 @@ class PatientController extends Controller
     {
         return $a_utc->copy()->timezone($timezone)->toDateString()
             === $b_utc->copy()->timezone($timezone)->toDateString();
+    }
+
+    private function active_manual_check_in_requested_at(CheckInSchedule $schedule, Carbon $now_utc): ?Carbon
+    {
+        if ($schedule->manual_check_in_requested_at === null) {
+            return null;
+        }
+
+        $localDate = $now_utc->copy()->timezone($schedule->timezone)->toDateString();
+        if ($schedule->manual_check_in_request_local_date !== $localDate) {
+            return null;
+        }
+
+        if (
+            $schedule->manual_check_in_consumed_at !== null
+            && $this->is_same_local_day($schedule->timezone, $schedule->manual_check_in_consumed_at, $now_utc)
+        ) {
+            return null;
+        }
+
+        return $schedule->manual_check_in_requested_at;
     }
 }

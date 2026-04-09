@@ -98,6 +98,16 @@ class AuthController extends Controller
 
         $now = now();
 
+        $patient->status = 'active';
+        $patient->save();
+
+        if ($schedule = \App\Models\CheckInSchedule::query()->where('patient_id', $patient->id)->first()) {
+            if ($schedule->status !== 'active') {
+                $schedule->status = 'active';
+                $schedule->save();
+            }
+        }
+
         $invite->first_used_at = $now;
         $invite->last_used_at = $now;
         $invite->use_count = (int) ($invite->use_count ?? 0) + 1;

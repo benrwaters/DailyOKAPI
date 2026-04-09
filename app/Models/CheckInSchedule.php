@@ -16,12 +16,17 @@ class CheckInSchedule extends Model
         'reminder_minutes_before',
         'next_due_at',
         'last_check_in_at',
+        'manual_check_in_requested_at',
+        'manual_check_in_request_local_date',
+        'manual_check_in_consumed_at',
         'status',
     ];
 
     protected $casts = [
         'next_due_at' => 'datetime',
         'last_check_in_at' => 'datetime',
+        'manual_check_in_requested_at' => 'datetime',
+        'manual_check_in_consumed_at' => 'datetime',
     ];
 
 

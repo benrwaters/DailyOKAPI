@@ -10,6 +10,7 @@ use App\Models\CheckIn;
 use App\Models\Patient;
 use App\Models\PatientInvite;
 use App\Services\BulkSmsClient;
+use App\Services\Push\PushNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
@@ -265,6 +266,57 @@ class CarerController extends Controller
         ]);
     }
 
+    public function request_loved_one_check_in_now(Request $request, string $id, PushNotificationService $pushes)
+    {
+        /** @var Carer $carer */
+        $carer = $request->user();
+
+        $patientId = $this->normalise_patient_id($id);
+
+        $link = CarerPatient::query()
+            ->where('carer_id', $carer->id)
+            ->where('patient_id', $patientId)
+            ->first();
+
+        if (!$link) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'not_found',
+                'message' => 'Contact not found.',
+            ], 404);
+        }
+
+        $patient = Patient::query()->findOrFail($patientId);
+        $schedule = CheckInSchedule::query()
+            ->where('patient_id', $patientId)
+            ->firstOrFail();
+
+        $localDate = now()->timezone($schedule->timezone)->toDateString();
+        if ($schedule->manual_check_in_request_local_date === $localDate) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'already_requested_today',
+                'message' => 'You can only request a check-in once a day.',
+            ], 409);
+        }
+
+        $schedule->manual_check_in_requested_at = now();
+        $schedule->manual_check_in_request_local_date = $localDate;
+        $schedule->manual_check_in_consumed_at = null;
+        $schedule->next_due_at = now();
+        $schedule->save();
+
+        $pushes->requestPatientCheckInNow($patient, $schedule, $carer->full_name ?: 'Your loved one');
+
+        return response()->json([
+            'ok' => true,
+            'request' => [
+                'requested_at' => optional($schedule->manual_check_in_requested_at)->toIso8601String(),
+                'local_date' => $localDate,
+            ],
+        ]);
+    }
+
     private function find_invite_for_carer_or_404(int $carer_id, string $invite_id): PatientInvite
     {
         $numeric_id = $this->normalise_invite_id($invite_id);
@@ -382,7 +434,7 @@ class CarerController extends Controller
 
         // never store raw; use password hashing (bcrypt)
         $patient->verification_hash = password_hash($validated['verification_value'], PASSWORD_BCRYPT);
-        $patient->status = 'active';
+        $patient->status = 'pending';
         $patient->save();
 
         $link = new CarerPatient();
@@ -398,7 +450,7 @@ class CarerController extends Controller
         $schedule->check_in_time_local = $validated['check_in_time_local'];
         $schedule->reminder_minutes_before = (int) $validated['reminder_minutes_before'];
         $schedule->grace_minutes = (int) ($validated['grace_minutes'] ?? 120);
-        $schedule->status = 'active';
+        $schedule->status = 'pending';
         $schedule->save();
 
         $code = $this->generate_invite_code();
@@ -536,6 +588,7 @@ class CarerController extends Controller
             ->where('carer_id', $carer->id)
             ->join('patients', 'patients.id', '=', 'carer_patients.patient_id')
             ->leftJoin('check_in_schedules', 'check_in_schedules.patient_id', '=', 'patients.id')
+            ->where('patients.status', 'active')
             ->select([
                 'patients.id as patient_id',
                 'patients.display_name',
