@@ -9,6 +9,7 @@ use App\Models\Device;
 use App\Models\Patient;
 use App\Models\PushNotificationEvent;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class PushNotificationService
 {
@@ -136,7 +137,7 @@ class PushNotificationService
                 'body' => $body,
                 'payload_json' => $payload,
                 'status' => $result['ok'] ? 'sent' : 'failed',
-                'failure_reason' => $result['reason'],
+                'failure_reason' => $this->truncateFailureReason($result['reason'] ?? null),
                 'sent_at' => $result['ok'] ? now() : null,
             ]);
         }
@@ -152,7 +153,9 @@ class PushNotificationService
             'body' => $body,
             'payload_json' => $payload,
             'status' => $sent ? 'sent' : 'failed',
-            'failure_reason' => $sent ? null : implode(', ', array_unique($failureReasons)),
+            'failure_reason' => $sent
+                ? null
+                : $this->truncateFailureReason(implode(', ', array_unique($failureReasons))),
             'sent_at' => $sent ? now() : null,
         ]);
 
@@ -164,5 +167,14 @@ class PushNotificationService
                 'failure_reasons' => $failureReasons,
             ]);
         }
+    }
+
+    private function truncateFailureReason(?string $reason): ?string
+    {
+        if ($reason === null) {
+            return null;
+        }
+
+        return Str::limit($reason, 250, '...');
     }
 }
