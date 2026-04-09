@@ -40,6 +40,12 @@ class ApnsPushService
             $url = rtrim($this->baseUrl(), '/') . '/3/device/' . $deviceToken;
 
             $response = Http::withToken($jwt)
+                ->withOptions([
+                    'version' => 2.0,
+                    'curl' => [
+                        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,
+                    ],
+                ])
                 ->timeout(10)
                 ->connectTimeout(5)
                 ->withHeaders([
