@@ -88,6 +88,14 @@ class SendCheckInReminders extends Command
                             $stage['body']
                         );
 
+                        if ($stage['stage'] === 'late') {
+                            $pushes->notifyCarersOfMissedCheckIn(
+                                $schedule->patient,
+                                $schedule,
+                                $localDate
+                            );
+                        }
+
                         $processed++;
                     }
                 }

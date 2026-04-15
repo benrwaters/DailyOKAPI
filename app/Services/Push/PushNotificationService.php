@@ -110,6 +110,37 @@ class PushNotificationService
         $this->deliver($eventKey, 'patient', $patient->id, $patient->id, null, $devices, $title, $body, $payload);
     }
 
+    public function notifyCarersOfMissedCheckIn(Patient $patient, CheckInSchedule $schedule, string $localDate): void
+    {
+        $carers = Carer::query()
+            ->join('carer_patients', 'carer_patients.carer_id', '=', 'carers.id')
+            ->where('carer_patients.patient_id', $patient->id)
+            ->select('carers.*')
+            ->get();
+
+        foreach ($carers as $carer) {
+            $eventKey = "carer:{$carer->id}:missed-check-in:{$patient->id}:{$localDate}";
+            $devices = Device::query()
+                ->where('owner_type', 'carer')
+                ->where('owner_id', $carer->id)
+                ->where('platform', 'ios')
+                ->where('notifications_enabled', true)
+                ->get();
+
+            $patientName = $patient->display_name ?: 'Your loved one';
+            $title = 'Check-in overdue';
+            $body = "{$patientName} has not checked in yet.";
+            $payload = [
+                'type' => 'carer_check_in_overdue',
+                'patient_id' => $patient->id,
+                'schedule_id' => $schedule->id,
+                'local_date' => $localDate,
+            ];
+
+            $this->deliver($eventKey, 'carer', $carer->id, $patient->id, $carer->id, $devices, $title, $body, $payload);
+        }
+    }
+
     private function deliver(
         string $eventKey,
         string $ownerType,
