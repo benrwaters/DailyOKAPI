@@ -37,6 +37,7 @@ Route::prefix('v1')->group(function () {
         Route::get('carer/loved-ones', [CarerController::class, 'list_loved_one_invites']);
         Route::post('carer/loved-ones', [CarerController::class, 'create_loved_one_and_invite']);
         Route::get('carer/loved-ones/{id}/check-ins', [CarerController::class, 'loved_one_check_ins']);
+        Route::patch('carer/loved-ones/{id}/schedule', [CarerController::class, 'update_loved_one_schedule']);
         Route::post('carer/loved-ones/{id}/request-check-in-now', [CarerController::class, 'request_loved_one_check_in_now']);
         Route::delete('carer/loved-ones/{id}', [CarerController::class, 'delete_loved_one']);
         Route::post('carer/loved-ones/{invite_id}/resend', [CarerController::class, 'resend_loved_one_invite']);

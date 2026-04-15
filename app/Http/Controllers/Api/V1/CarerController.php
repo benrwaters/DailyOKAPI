@@ -244,6 +244,9 @@ class CarerController extends Controller
         }
 
         $patient = Patient::query()->findOrFail($patientId);
+        $schedule = CheckInSchedule::query()
+            ->where('patient_id', $patientId)
+            ->first();
         $checkIns = CheckIn::query()
             ->where('patient_id', $patientId)
             ->orderByDesc('checked_in_at')
@@ -257,12 +260,73 @@ class CarerController extends Controller
                 'phone_e164' => $patient->phone_e164,
                 'status' => $patient->status,
             ],
+            'schedule' => $schedule ? [
+                'timezone' => $schedule->timezone,
+                'check_in_time_local' => $schedule->check_in_time_local,
+                'reminder_minutes_before' => (int) $schedule->reminder_minutes_before,
+                'status' => $schedule->status,
+            ] : null,
             'check_ins' => $checkIns->map(fn ($checkIn) => [
                 'id' => (string) $checkIn->id,
                 'checked_in_at' => optional($checkIn->checked_in_at)->toIso8601String(),
                 'type' => $checkIn->type,
                 'created_at' => optional($checkIn->created_at)->toIso8601String(),
             ])->values(),
+        ]);
+    }
+
+    public function update_loved_one_schedule(Request $request, string $id)
+    {
+        /** @var Carer $carer */
+        $carer = $request->user();
+
+        $patientId = $this->normalise_patient_id($id);
+
+        $link = CarerPatient::query()
+            ->where('carer_id', $carer->id)
+            ->where('patient_id', $patientId)
+            ->first();
+
+        if (!$link) {
+            return response()->json([
+                'ok' => false,
+                'error' => 'not_found',
+                'message' => 'Contact not found.',
+            ], 404);
+        }
+
+        $validated = $request->validate([
+            'check_in_time_local' => ['sometimes', 'required', 'regex:/^\d{2}:\d{2}$/'],
+            'reminder_minutes_before' => ['sometimes', 'required', 'integer', 'min:0', 'max:240'],
+            'timezone' => ['sometimes', 'required', 'string', 'max:64'],
+        ]);
+
+        $schedule = CheckInSchedule::query()
+            ->where('patient_id', $patientId)
+            ->firstOrFail();
+
+        if (array_key_exists('check_in_time_local', $validated)) {
+            $schedule->check_in_time_local = $validated['check_in_time_local'];
+        }
+
+        if (array_key_exists('reminder_minutes_before', $validated)) {
+            $schedule->reminder_minutes_before = (int) $validated['reminder_minutes_before'];
+        }
+
+        if (array_key_exists('timezone', $validated)) {
+            $schedule->timezone = $validated['timezone'];
+        }
+
+        $schedule->save();
+
+        return response()->json([
+            'ok' => true,
+            'schedule' => [
+                'timezone' => $schedule->timezone,
+                'check_in_time_local' => $schedule->check_in_time_local,
+                'reminder_minutes_before' => (int) $schedule->reminder_minutes_before,
+                'status' => $schedule->status,
+            ],
         ]);
     }
 
