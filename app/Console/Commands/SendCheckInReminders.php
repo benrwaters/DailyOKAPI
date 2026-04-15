@@ -70,8 +70,12 @@ class SendCheckInReminders extends Command
 
                     foreach ($stages as $stage) {
                         $targetUtc = $stage['target']->setTimezone('UTC');
+                        $shouldSend = match ($stage['stage']) {
+                            'late' => $nowUtc->gte($targetUtc),
+                            default => $nowUtc->gte($targetUtc) && $nowUtc->lte($targetUtc->addMinutes($windowMinutes)),
+                        };
 
-                        if ($nowUtc->lt($targetUtc) || $nowUtc->gt($targetUtc->addMinutes($windowMinutes))) {
+                        if (!$shouldSend) {
                             continue;
                         }
 
