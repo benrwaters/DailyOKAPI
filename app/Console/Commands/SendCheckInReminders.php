@@ -57,21 +57,31 @@ class SendCheckInReminders extends Command
                     $stages[] = [
                         'stage' => 'due',
                         'target' => $dueLocal,
+                        'audience' => 'patient',
                         'title' => 'Time to check in',
                         'body' => 'Please check in now so your carer knows you are OK.',
                     ];
 
                     $stages[] = [
-                        'stage' => 'late',
-                        'target' => $dueLocal->addHour(),
+                        'stage' => 'late_30',
+                        'target' => $dueLocal->addMinutes(30),
+                        'audience' => 'patient',
                         'title' => 'Check-in overdue',
                         'body' => 'You have missed your check-in. Please confirm you are OK.',
+                    ];
+
+                    $stages[] = [
+                        'stage' => 'late_60_carer',
+                        'target' => $dueLocal->addHour(),
+                        'audience' => 'carer',
+                        'title' => 'Check-in overdue',
+                        'body' => 'Loved one has not checked in yet.',
                     ];
 
                     foreach ($stages as $stage) {
                         $targetUtc = $stage['target']->setTimezone('UTC');
                         $shouldSend = match ($stage['stage']) {
-                            'late' => $nowUtc->gte($targetUtc),
+                            'late_30', 'late_60_carer' => $nowUtc->gte($targetUtc),
                             default => $nowUtc->gte($targetUtc) && $nowUtc->lte($targetUtc->addMinutes($windowMinutes)),
                         };
 
@@ -79,16 +89,16 @@ class SendCheckInReminders extends Command
                             continue;
                         }
 
-                        $pushes->sendPatientReminder(
-                            $schedule->patient,
-                            $schedule,
-                            $stage['stage'],
-                            $localDate,
-                            $stage['title'],
-                            $stage['body']
-                        );
-
-                        if ($stage['stage'] === 'late') {
+                        if (($stage['audience'] ?? 'patient') === 'patient') {
+                            $pushes->sendPatientReminder(
+                                $schedule->patient,
+                                $schedule,
+                                $stage['stage'],
+                                $localDate,
+                                $stage['title'],
+                                $stage['body']
+                            );
+                        } else {
                             $pushes->notifyCarersOfMissedCheckIn(
                                 $schedule->patient,
                                 $schedule,
