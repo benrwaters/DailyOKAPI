@@ -12,6 +12,7 @@ class CheckInSchedule extends Model
         'cadence',
         'timezone',
         'check_in_time_local',
+        'second_check_in_time_local',
         'grace_minutes',
         'reminder_minutes_before',
         'next_due_at',
@@ -35,5 +36,28 @@ class CheckInSchedule extends Model
     public function patient()
     {
         return $this->belongsTo(Patient::class);
+    }
+
+    public function configuredSlots(): array
+    {
+        $slots = [
+            [
+                'key' => 'primary',
+                'time_local' => $this->check_in_time_local,
+            ],
+        ];
+
+        if (!empty($this->second_check_in_time_local)) {
+            $slots[] = [
+                'key' => 'secondary',
+                'time_local' => $this->second_check_in_time_local,
+            ];
+        }
+
+        usort($slots, function (array $a, array $b) {
+            return strcmp($a['time_local'], $b['time_local']);
+        });
+
+        return $slots;
     }
 }

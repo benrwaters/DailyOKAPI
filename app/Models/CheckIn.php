@@ -12,6 +12,7 @@ class CheckIn extends Model
         'patient_id',
         'checked_in_at',
         'type',
+        'slot_key',
     ];
 
     protected $casts = [

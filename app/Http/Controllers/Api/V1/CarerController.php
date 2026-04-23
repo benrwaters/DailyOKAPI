@@ -12,6 +12,7 @@ use App\Models\PatientInvite;
 use App\Services\BulkSmsClient;
 use App\Services\Push\PushNotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -263,6 +264,7 @@ class CarerController extends Controller
             'schedule' => $schedule ? [
                 'timezone' => $schedule->timezone,
                 'check_in_time_local' => $schedule->check_in_time_local,
+                'second_check_in_time_local' => $schedule->second_check_in_time_local,
                 'reminder_minutes_before' => (int) $schedule->reminder_minutes_before,
                 'status' => $schedule->status,
             ] : null,
@@ -270,6 +272,7 @@ class CarerController extends Controller
                 'id' => (string) $checkIn->id,
                 'checked_in_at' => optional($checkIn->checked_in_at)->toIso8601String(),
                 'type' => $checkIn->type,
+                'slot_key' => $checkIn->slot_key,
                 'created_at' => optional($checkIn->created_at)->toIso8601String(),
             ])->values(),
         ]);
@@ -295,8 +298,13 @@ class CarerController extends Controller
             ], 404);
         }
 
+        if ($request->input('second_check_in_time_local') === '') {
+            $request->merge(['second_check_in_time_local' => null]);
+        }
+
         $validated = $request->validate([
             'check_in_time_local' => ['sometimes', 'required', 'regex:/^\d{2}:\d{2}$/'],
+            'second_check_in_time_local' => ['sometimes', 'nullable', 'regex:/^\d{2}:\d{2}$/'],
             'reminder_minutes_before' => ['sometimes', 'required', 'integer', 'min:0', 'max:240'],
             'timezone' => ['sometimes', 'required', 'string', 'max:64'],
         ]);
@@ -309,6 +317,10 @@ class CarerController extends Controller
             $schedule->check_in_time_local = $validated['check_in_time_local'];
         }
 
+        if (array_key_exists('second_check_in_time_local', $validated)) {
+            $schedule->second_check_in_time_local = $validated['second_check_in_time_local'];
+        }
+
         if (array_key_exists('reminder_minutes_before', $validated)) {
             $schedule->reminder_minutes_before = (int) $validated['reminder_minutes_before'];
         }
@@ -317,6 +329,12 @@ class CarerController extends Controller
             $schedule->timezone = $validated['timezone'];
         }
 
+        $this->assert_check_in_times_are_far_enough_apart(
+            $schedule->check_in_time_local,
+            $schedule->second_check_in_time_local
+        );
+
+        $schedule->next_due_at = $this->compute_next_due_at_for_schedule($schedule, now());
         $schedule->save();
 
         return response()->json([
@@ -324,6 +342,7 @@ class CarerController extends Controller
             'schedule' => [
                 'timezone' => $schedule->timezone,
                 'check_in_time_local' => $schedule->check_in_time_local,
+                'second_check_in_time_local' => $schedule->second_check_in_time_local,
                 'reminder_minutes_before' => (int) $schedule->reminder_minutes_before,
                 'status' => $schedule->status,
             ],
@@ -487,9 +506,15 @@ class CarerController extends Controller
             'cadence' => ['required', 'string', 'in:daily'],
             'timezone' => ['required', 'string', 'max:64'],
             'check_in_time_local' => ['required', 'string', 'max:5'], // "HH:mm"
+            'second_check_in_time_local' => ['nullable', 'regex:/^\d{2}:\d{2}$/'],
             'reminder_minutes_before' => ['required', 'integer', 'min:0', 'max:240'],
             'grace_minutes' => ['nullable', 'integer', 'min:0', 'max:720'],
         ]);
+
+        $this->assert_check_in_times_are_far_enough_apart(
+            $validated['check_in_time_local'],
+            $validated['second_check_in_time_local'] ?? null
+        );
 
         $patient = new Patient();
         $patient->display_name = $validated['loved_one_name'] ?? null;
@@ -512,6 +537,7 @@ class CarerController extends Controller
         $schedule->cadence = $validated['cadence'];
         $schedule->timezone = $validated['timezone'];
         $schedule->check_in_time_local = $validated['check_in_time_local'];
+        $schedule->second_check_in_time_local = $validated['second_check_in_time_local'] ?? null;
         $schedule->reminder_minutes_before = (int) $validated['reminder_minutes_before'];
         $schedule->grace_minutes = (int) ($validated['grace_minutes'] ?? 120);
         $schedule->status = 'pending';
@@ -543,7 +569,7 @@ class CarerController extends Controller
             $debug_email = "ben@spinningtheweb.co.uk";
             if (!empty($debug_email)) {
                 Mail::raw(
-                    "DailyOK Invite (debug)\n\nCarer ID: {$carer->id}\nLoved one phone: {$patient->phone_e164}\nInvite code: {$code}\nSchedule: {$schedule->cadence} @ {$schedule->check_in_time_local} ({$schedule->timezone})\nReminder: {$schedule->reminder_minutes_before} mins\nVerification hint: {$patient->verification_hint}",
+                    "DailyOK Invite (debug)\n\nCarer ID: {$carer->id}\nLoved one phone: {$patient->phone_e164}\nInvite code: {$code}\nSchedule: {$schedule->cadence} @ {$schedule->check_in_time_local}" . ($schedule->second_check_in_time_local ? " & {$schedule->second_check_in_time_local}" : '') . " ({$schedule->timezone})\nReminder: {$schedule->reminder_minutes_before} mins\nVerification hint: {$patient->verification_hint}",
                     function ($m) use ($debug_email) {
                         $m->to($debug_email)->subject('DailyOK invite (debug)');
                     }
@@ -576,6 +602,7 @@ class CarerController extends Controller
                 'cadence' => $schedule->cadence,
                 'timezone' => $schedule->timezone,
                 'check_in_time_local' => $schedule->check_in_time_local,
+                'second_check_in_time_local' => $schedule->second_check_in_time_local,
                 'reminder_minutes_before' => $schedule->reminder_minutes_before,
             ],
         ]);
@@ -708,6 +735,105 @@ class CarerController extends Controller
         }
 
         return 'pending';
+    }
+
+    private function assert_check_in_times_are_far_enough_apart(string $primaryTime, ?string $secondaryTime): void
+    {
+        if (empty($secondaryTime)) {
+            return;
+        }
+
+        if ($primaryTime === $secondaryTime) {
+            throw new HttpResponseException(response()->json([
+                'ok' => false,
+                'error' => 'schedule_too_close',
+                'message' => 'The two check-in times must be at least 6 hours apart.',
+            ], 422));
+        }
+
+        $primaryMinutes = $this->minutes_since_midnight($primaryTime);
+        $secondaryMinutes = $this->minutes_since_midnight($secondaryTime);
+        $difference = abs($primaryMinutes - $secondaryMinutes);
+        $wrappedDifference = min($difference, (24 * 60) - $difference);
+
+        if ($wrappedDifference < 360) {
+            throw new HttpResponseException(response()->json([
+                'ok' => false,
+                'error' => 'schedule_too_close',
+                'message' => 'The two check-in times must be at least 6 hours apart.',
+            ], 422));
+        }
+    }
+
+    private function minutes_since_midnight(string $time): int
+    {
+        [$hour, $minute] = array_pad(explode(':', $time, 2), 2, '00');
+
+        return (((int) $hour) * 60) + (int) $minute;
+    }
+
+    private function compute_next_due_at_for_schedule(CheckInSchedule $schedule, \Illuminate\Support\Carbon $nowUtc): \Illuminate\Support\Carbon
+    {
+        $timezone = $schedule->timezone ?: 'Europe/London';
+        $localNow = $nowUtc->copy()->timezone($timezone);
+        $slots = $schedule->configuredSlots();
+        $checkedSlotKeys = $this->checked_slot_keys_for_local_day($schedule->patient_id, $timezone, $nowUtc);
+
+        foreach ($slots as $slot) {
+            if (in_array($slot['key'], $checkedSlotKeys, true)) {
+                continue;
+            }
+
+            [$hour, $minute] = array_pad(explode(':', $slot['time_local'], 2), 2, '00');
+            $dueLocal = $localNow->copy()->startOfDay()->setTime((int) $hour, (int) $minute, 0);
+
+            if ($nowUtc->gte($dueLocal->copy()->timezone('UTC'))) {
+                return $nowUtc;
+            }
+        }
+
+        foreach ($slots as $slot) {
+            if (in_array($slot['key'], $checkedSlotKeys, true)) {
+                continue;
+            }
+
+            [$hour, $minute] = array_pad(explode(':', $slot['time_local'], 2), 2, '00');
+            return $localNow->copy()->startOfDay()->setTime((int) $hour, (int) $minute, 0)->timezone('UTC');
+        }
+
+        $firstSlot = $slots[0] ?? ['time_local' => $schedule->check_in_time_local];
+        [$hour, $minute] = array_pad(explode(':', $firstSlot['time_local'], 2), 2, '00');
+
+        return $localNow->copy()->addDay()->startOfDay()->setTime((int) $hour, (int) $minute, 0)->timezone('UTC');
+    }
+
+    private function checked_slot_keys_for_local_day(int $patientId, string $timezone, \Illuminate\Support\Carbon $nowUtc): array
+    {
+        $localNow = $nowUtc->copy()->timezone($timezone);
+        $startUtc = $localNow->copy()->startOfDay()->timezone('UTC');
+        $endUtc = $localNow->copy()->endOfDay()->timezone('UTC');
+
+        $checkIns = CheckIn::query()
+            ->where('patient_id', $patientId)
+            ->whereBetween('checked_in_at', [$startUtc, $endUtc])
+            ->orderBy('checked_in_at')
+            ->get(['slot_key']);
+
+        $slotKeys = [];
+        $legacyKeys = ['primary', 'secondary'];
+
+        foreach ($checkIns as $checkIn) {
+            if (!empty($checkIn->slot_key)) {
+                $slotKeys[] = $checkIn->slot_key;
+                continue;
+            }
+
+            if (!empty($legacyKeys)) {
+                $slotKeys[] = array_shift($legacyKeys);
+            }
+        }
+
+        return array_values(array_unique($slotKeys));
     }
 
 }

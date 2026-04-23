@@ -60,6 +60,7 @@ class ApnsPushService
                             'body' => $body,
                         ],
                         'sound' => 'default',
+                        'interruption-level' => 'time-sensitive',
                     ],
                     'dailyok' => $payload,
                 ], JSON_UNESCAPED_SLASHES), 'application/json')

@@ -21,12 +21,13 @@ class PushNotificationService
     public function sendPatientReminder(
         Patient $patient,
         CheckInSchedule $schedule,
+        string $slotKey,
         string $stage,
         string $localDate,
         string $title,
         string $body
     ): void {
-        $eventKey = "patient:{$patient->id}:{$localDate}:{$stage}";
+        $eventKey = "patient:{$patient->id}:{$localDate}:{$slotKey}:{$stage}";
 
         if (PushNotificationEvent::query()->where('event_key', $eventKey)->exists()) {
             return;
@@ -41,6 +42,7 @@ class PushNotificationService
 
         $payload = [
             'type' => 'patient_check_in_reminder',
+            'slot_key' => $slotKey,
             'stage' => $stage,
             'patient_id' => $patient->id,
             'local_date' => $localDate,
@@ -75,6 +77,7 @@ class PushNotificationService
                 'patient_id' => $patient->id,
                 'check_in_id' => $checkIn->id,
                 'checked_in_at' => optional($checkIn->checked_in_at)->toIso8601String(),
+                'slot_key' => $checkIn->slot_key,
             ];
 
             $this->deliver($eventKey, 'carer', $carer->id, $patient->id, $carer->id, $devices, $title, $body, $payload);
@@ -110,7 +113,7 @@ class PushNotificationService
         $this->deliver($eventKey, 'patient', $patient->id, $patient->id, null, $devices, $title, $body, $payload);
     }
 
-    public function notifyCarersOfMissedCheckIn(Patient $patient, CheckInSchedule $schedule, string $localDate): void
+    public function notifyCarersOfMissedCheckIn(Patient $patient, CheckInSchedule $schedule, string $localDate, string $slotKey): void
     {
         $carers = Carer::query()
             ->join('carer_patients', 'carer_patients.carer_id', '=', 'carers.id')
@@ -119,7 +122,7 @@ class PushNotificationService
             ->get();
 
         foreach ($carers as $carer) {
-            $eventKey = "carer:{$carer->id}:missed-check-in:{$patient->id}:{$localDate}";
+            $eventKey = "carer:{$carer->id}:missed-check-in:{$patient->id}:{$localDate}:{$slotKey}";
             $devices = Device::query()
                 ->where('owner_type', 'carer')
                 ->where('owner_id', $carer->id)
@@ -135,6 +138,7 @@ class PushNotificationService
                 'patient_id' => $patient->id,
                 'schedule_id' => $schedule->id,
                 'local_date' => $localDate,
+                'slot_key' => $slotKey,
             ];
 
             $this->deliver($eventKey, 'carer', $carer->id, $patient->id, $carer->id, $devices, $title, $body, $payload);
